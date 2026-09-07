@@ -204,12 +204,15 @@ class DeliverySim:
         if action == "play":
             if self.phase == "done":
                 return
+            was = self.phase
             self._last_wall = time.monotonic()
             self.phase = "running"
-            self._log("Delivery run started · van on the road", "info")
+            if was != "running":  # only announce a real transition, not a re-play
+                self._log("Delivery run started · van on the road", "info")
         elif action == "pause":
-            self.phase = "paused"
-            self._log("Run paused", "info")
+            if self.phase == "running":
+                self.phase = "paused"
+                self._log("Run paused", "info")
 
     def tick(self) -> None:
         """Advance the clock by real elapsed time × timescale."""

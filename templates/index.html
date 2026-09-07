@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Delivery Command Center</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <div class="logo">
+      Delivery Command Center
+      <small>priority-weighted load &amp; route · live disruption re-routing</small>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill">⏱ <b id="clock-pill">--:--</b></span>
+    <span class="pill" id="phase-pill">idle</span>
+    <button class="btn-demo" id="btn-demo">▶ Run auto-demo</button>
+  </header>
+
+  <main>
+    <!-- ================= LEFT · plan the load ================= -->
+    <section class="panel" id="plan-panel">
+      <h2>1 · Plan the load <span class="hint">0/1 knapsack</span></h2>
+      <div class="scroll">
+        <div class="ctl">
+          <label class="row"><span>Van capacity</span><b id="cap-val">430</b></label>
+          <input type="range" id="cap" min="80" max="900" step="10" value="430">
+          <label class="row" style="margin-top:8px"><span>Priority premium (value of going first)</span><b id="prem-val">220</b></label>
+          <input type="range" id="prem" min="0" max="500" step="10" value="220">
+          <label class="row" style="margin-top:8px"><span>Punctuality λ (route priority weight)</span><b id="strict-val">4.0</b></label>
+          <input type="range" id="strict" min="0" max="12" step="0.5" value="4">
+        </div>
+
+        <div class="ctl">
+          <label class="row"><span>Deliver to</span></label>
+          <div class="seg" id="scope">
+            <button data-scope="loaded">Loaded stops</button>
+            <button data-scope="all">Every stop</button>
+            <button data-scope="critical">Critical only</button>
+          </div>
+        </div>
+
+        <div class="warn crit" id="load-warns" hidden></div>
+        <div class="loadbar"><div id="load-fill" style="width:0%"></div></div>
+        <div class="sumrow"><span>Fill</span><b id="s-fill">–</b></div>
+        <div class="sumrow"><span>Weight / capacity</span><b id="s-weight">–</b></div>
+        <div class="sumrow"><span>Value (score)</span><b id="s-value">–</b></div>
+
+        <button class="primary" id="btn-plan" style="margin-top:10px">Re-plan load &amp; route</button>
+
+        <h2 style="padding:14px 0 6px; border:none">Catalog — uncheck to exclude an item</h2>
+        <div class="items" id="item-list"></div>
+      </div>
+    </section>
+
+    <!-- ================= CENTER · the map ================= -->
+    <section class="panel" id="map-panel">
+      <h2>2 · Route map <span class="hint">click a road → roadblock · alt-click → traffic</span></h2>
+      <div id="map-wrap"></div>
+      <div class="statusbar">
+        <span>📍 <b id="st-target">no run</b></span>
+        <span>🚚 <b id="st-remaining">–</b> left</span>
+        <span>✓ <b id="st-delivered">0</b></span>
+        <span>↻ <b id="st-reroutes">0</b></span>
+        <span>⏱ <b id="st-eta">–</b></span>
+      </div>
+      <div id="tooltip"></div>
+    </section>
+
+    <!-- ================= RIGHT · route & events ================= -->
+    <section class="panel" id="route-panel">
+      <h2>3 · Dispatch &amp; watch</h2>
+      <div class="scroll">
+        <button class="primary" id="btn-start">🚚 Dispatch van →</button>
+        <div class="seg" style="margin-bottom:8px">
+          <button id="btn-playpause">⏸ Pause</button>
+        </div>
+        <div class="ctl" style="margin:0">
+          <label class="row"><span>Simulation speed</span><b id="speed-val">1×</b></label>
+          <input type="range" id="speed" min="1" max="6" step="1" value="1">
+        </div>
+
+        <div class="kpis">
+          <div class="kpi"><div class="n" id="k-delivered">0</div><div class="l">delivered</div></div>
+          <div class="kpi"><div class="n" id="k-reroutes">0</div><div class="l">re-routes</div></div>
+          <div class="kpi late"><div class="n" id="k-late">0</div><div class="l">late stops</div></div>
+          <div class="kpi"><div class="n" id="k-min">0</div><div class="l">run mins</div></div>
+        </div>
+
+        <div class="ctl">
+          <label class="row"><span>Inject disruption on a road</span></label>
+          <select id="road-sel"></select>
+          <div class="mut-row">
+            <button class="btn-bad" id="btn-rb" title="Close this road — forces a re-route">⛔ Roadblock</button>
+            <button class="btn-amber" id="btn-tr" title="Slow this road ×3">🐢 Traffic</button>
+            <button class="ghost" id="btn-clear-rb" style="width:auto;padding:6px 8px;font-size:11.5px">Clear</button>
+          </div>
+        </div>
+
+        <h2 style="padding:8px 0 4px; border:none">Route sequence</h2>
+        <div class="stopseq" id="route-order"><div class="seqrow"><span class="nm" style="color:#94a3b8">Plan a load to see the stop order.</span></div></div>
+      </div>
+      <div class="foot">
+        <h2 style="padding:0 0 6px; border:none">Event log</h2>
+        <div id="event-log" style="height:150px;overflow-y:auto"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
