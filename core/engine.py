@@ -378,6 +378,12 @@ class DeliverySim:
     # ------------------------------------------------------------------ #
     # scripted auto-demo
     # ------------------------------------------------------------------ #
+    def add_scripted_event(self, at: float, rid: str, kind: str,
+                           factor: Optional[float] = None) -> None:
+        """Queue a disruption to appear at simulated time ``at`` (auto-demo)."""
+        self._script.append({"at": at, "rid": rid, "kind": kind, "factor": factor})
+        self._script.sort(key=lambda e: e["at"])
+
     def _fire_scripts(self) -> None:
         while self._script and self._script[0]["at"] <= self.clock:
             ev = self._script.pop(0)
