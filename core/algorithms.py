@@ -168,6 +168,7 @@ NodeCost = Callable[[int, int], float]
 def tsp_held_karp(
     matrix: Sequence[Sequence[float]],
     start: int = 0,
+    home: Optional[int] = None,
     node_cost: Optional[NodeCost] = None,
     return_to_start: bool = True,
 ) -> Tuple[float, List[int]]:
@@ -176,6 +177,11 @@ def tsp_held_karp(
     Visits every node except ``start`` exactly once and, by default, returns to
     ``start`` (a closed tour). Returns ``(best_cost, order)`` where ``order`` lists
     the visited nodes in the order they are reached.
+
+    ``home`` optionally names a *different* finish node than ``start`` (used when a
+    mid-run re-plan starts at the van's current position but must still come back to
+    the depot); ``return_to_start`` is shorthand for ``home = start`` and is kept
+    for backwards compatibility.
 
     With ``others`` = the n-1 non-start nodes, define ``m = |others|`` and let
     ``dp[mask][k]`` = minimum cost of a path that starts at ``start``, visits
@@ -188,29 +194,34 @@ def tsp_held_karp(
         dp[mask | {j}][j] = min_k dp[mask][k] + d(others[k], others[j])
                             + cost(others[j], c(mask) + 1)
 
-    and the closed tour closes with ``min_k dp[full][k] + d(others[k], start)``.
+    and the route closes with ``min_k dp[full][k] + d(others[k], home)``.
 
     **Complexity:** O(m^2 2^m) time, O(m 2^m) space. Since m = n-1 this is the
     standard O(n^2 2^n) TSP DP — exponential, exact, and ideal for the small
     stop-counts of a real delivery run.
 
-    **Correctness:** an optimal tour restricted to a prefix ending at ``k`` must
+    **Correctness:** an optimal route restricted to a prefix ending at ``k`` must
     itself be optimal for its subset and endpoint (otherwise swap in the better
-    prefix and improve the whole tour), so the DP is exact.
+    prefix and improve the whole route), so the DP is exact.
 
     Args:
         matrix: n x n symmetric distance (time) matrix between nodes.
-        start: the depot node — tour starts and ends here.
+        start: the node the route starts from (e.g. the van's current position).
+        home: the node the route must end at (e.g. the depot). Defaults to ``start``.
         node_cost: optional ``cost(node, position)`` additive term.
-        return_to_start: whether the tour must come back to ``start``.
+        return_to_start: kept for compatibility; True ⇔ ``home = start``.
 
     Returns:
         ``(best_cost, order)``.
     """
+    if home is None:
+        home = start
+    if not return_to_start:
+        home = start  # backward-compat: no-return meant "finish at start"
     n = len(matrix)
     if n == 0:
         return 0.0, []
-    others = [i for i in range(n) if i != start]
+    others = [i for i in range(n) if i != start and i != home]
     m = len(others)
     if m == 0:
         return 0.0, []
@@ -244,10 +255,10 @@ def tsp_held_karp(
                     dp[nmask][j] = cand
                     parent[nmask][j] = (mask, k)
 
-    # close the tour back at start
+    # close the route back at home
     best_last, best = -1, INF
     for k in range(m):
-        cand = dp[full][k] + (matrix[others[k]][start] if return_to_start else 0.0)
+        cand = dp[full][k] + matrix[others[k]][home]
         if cand < best - 1e-12:
             best, best_last = cand, k
 
@@ -274,62 +285,68 @@ def tsp_held_karp(
 def tsp_nearest_neighbor_2opt(
     matrix: Sequence[Sequence[float]],
     start: int = 0,
-    return_to_start: bool = True,
+    home: Optional[int] = None,
     improvement_passes: int = 8,
 ) -> Tuple[float, List[int]]:
     """Fast approximation for symmetric TSP: nearest neighbour + 2-opt.
 
-    Nearest neighbour greedily builds a tour (always polynomial, O(n^2)); a local
+    Nearest neighbour greedily builds a route (always polynomial, O(n^2)); a local
     search then repeatedly applies the classic **2-opt** move — reverse a contiguous
-    block of the tour when the two edges ``(a,b),(c,d)`` can be replaced by the
+    block of the route when the two edges ``(a,b),(c,d)`` can be replaced by the
     non-crossing pair ``(a,c),(b,d)`` with a saving::
 
         gain = d(a,b) + d(c,d) - d(a,c) - d(b,d)     # > 0 ⇒ improvement
 
-    A single 2-opt pass is O(n^2); the routine runs up to ``improvement_passes``
-    passes. The result is not guaranteed optimal (2-opt is exact only for the
-    Euclidean plane, not general metric instances) so it is used as an
-    *approximation* — the UI/report compare it against the exact Held–Karp result.
+    The route starts at ``start`` and ends at ``home`` (default ``start`` ⇒ closed
+    tour). Endpoints are fixed during 2-opt, so the heuristic works for mid-run
+    re-planning where the van is *not* at the depot. A single 2-opt pass is O(n^2);
+    the routine runs up to ``improvement_passes`` passes. The result is not
+    guaranteed optimal so it is used as an *approximation* — the UI/report compare
+    it against the exact Held–Karp result.
 
-    Returns ``(cost, order)`` like :func:`tsp_held_karp`.
+    Returns ``(cost, order)`` where ``order`` is the visited-node sequence
+    (excluding ``start`` and ``home``).
     """
     n = len(matrix)
     if n <= 1:
         return 0.0, []
-    unvisited = set(range(n))
-    unvisited.discard(start)
-    order: List[int] = []
+    if home is None:
+        home = start
+    fixed = {start, home} if home != start else {start}
+    others = [i for i in range(n) if i not in fixed]
+
+    # --- nearest neighbour ---
+    seq: List[int] = [start]
+    unvisited = set(others)
     cur = start
     while unvisited:
         nxt = min(unvisited, key=lambda j: matrix[cur][j])
-        order.append(nxt)
+        seq.append(nxt)
         unvisited.remove(nxt)
         cur = nxt
+    seq.append(home)
 
-    # build a circular tour list [start, ..., start]
-    tour: List[int] = [start] + order + ([start] if return_to_start else [])
+    # --- 2-opt on the path seq[0]=start .. seq[-1]=home (endpoints fixed) ---
+    L = len(seq)
 
     def gain(i: int, k: int) -> float:
-        # reverse segment (i+1 .. k) — edges (tour[i],tour[i+1]) & (tour[k],tour[k+1])
-        # become (tour[i],tour[k]) & (tour[i+1],tour[k+1])
-        a, b, c, d = tour[i], tour[i + 1], tour[k], tour[(k + 1) % len(tour)]
+        # reverse segment seq[i..k]; new edges (seq[i-1], seq[k]) & (seq[i], seq[k+1])
+        a, b, c, d = seq[i - 1], seq[i], seq[k], seq[k + 1]
         return matrix[a][b] + matrix[c][d] - matrix[a][c] - matrix[b][d]
 
-    stop = len(tour) - 1  # last index before the closing edge
     for _ in range(max(1, improvement_passes)):
         improved = False
-        for i in range(0, stop - 1):
-            for k in range(i + 2, stop):
-                if k - i > 1 and gain(i, k) > 1e-9:
-                    tour[i + 1 : k + 1] = reversed(tour[i + 1 : k + 1])
+        for i in range(1, L - 1):
+            for k in range(i, L - 1):
+                if k > i and gain(i, k) > 1e-9:
+                    seq[i : k + 1] = reversed(seq[i : k + 1])
                     improved = True
         if not improved:
             break
 
-    order = tour[1 : stop if return_to_start else len(tour)]
-    if not return_to_start:
-        order = tour[1:]
-    return tour_cost(matrix, order, return_to_start), order
+    order = seq[1:-1]
+    cost = sum(matrix[seq[i]][seq[i + 1]] for i in range(L - 1))
+    return cost, order
 
 
 def tour_cost(

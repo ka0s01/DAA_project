@@ -117,17 +117,19 @@ def test_dijkstra_unreachable_raises():
 # --------------------------------------------------------------------------- #
 # TSP: Held-Karp exact vs brute force (with and without position costs)
 # --------------------------------------------------------------------------- #
-def brute_tsp(matrix, start=0, node_cost=None, return_to_start=True):
-    others = [i for i in range(len(matrix)) if i != start]
+def brute_tsp(matrix, start=0, node_cost=None, home=None):
+    if home is None:
+        home = start
+    others = [i for i in range(len(matrix)) if i not in (start, home)]
     best = math.inf
     for perm in itertools.permutations(others):
-        cost = (matrix[start][perm[0]] if perm else 0.0)
+        cost = matrix[start][perm[0]] if perm else 0.0
         for a, b in zip(perm, perm[1:]):
             cost += matrix[a][b]
         for pos, node in enumerate(perm, start=1):
             cost += (node_cost(node, pos) if node_cost else 0.0)
-        if return_to_start and perm:
-            cost += matrix[perm[-1]][start]
+        if perm:
+            cost += matrix[perm[-1]][home]
         best = min(best, cost)
     return best
 
@@ -167,6 +169,23 @@ def test_held_karp_with_position_costs():
             best, order = tsp_held_karp(mat, node_cost=cost)
             assert abs(best - brute_tsp(mat, node_cost=cost)) < 1e-6
     ok("tsp_held_karp exact with additive position cost (priority penalty)")
+
+
+def test_held_karp_open_route_home_different():
+    # Re-planning mid-run: route STARTS at a non-depot node but must still finish at
+    # the depot. Held-Karp must treat start and home independently.
+    rng = random.Random(5)
+    for _ in range(20):
+        n = rng.randint(4, 6)
+        mat = random_matrix(rng, n)
+        start = rng.randrange(n)
+        home = rng.randrange(n)
+        while home == start:
+            home = rng.randrange(n)
+        best, order = tsp_held_karp(mat, start=start, home=home)
+        assert len(set(order)) == len(order) == n - 2
+        assert abs(best - brute_tsp(mat, start=start, home=home)) < 1e-6
+    ok("tsp_held_karp exact when start != home (mid-run re-plan)")
 
 
 def test_nn_2opt_never_beats_exact():
@@ -270,6 +289,7 @@ if __name__ == "__main__":
     test_dijkstra_unreachable_raises()
     test_held_karp_vs_bruteforce()
     test_held_karp_with_position_costs()
+    test_held_karp_open_route_home_different()
     test_nn_2opt_never_beats_exact()
     test_nn_2opt_returns_valid_tour()
     test_bridge_roadblock_detour()

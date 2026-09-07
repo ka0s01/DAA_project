@@ -1,5 +1,6 @@
 """Delivery Command Center — algorithm & simulation core."""
 
+from . import algorithms, city, engine, routing
 from .algorithms import (
     knapsack_01,
     dijkstra,
@@ -11,6 +12,10 @@ from .algorithms import (
 from .city import build_city, City
 
 __all__ = [
+    "algorithms",
+    "city",
+    "routing",
+    "engine",
     "knapsack_01",
     "dijkstra",
     "shortest_path",
