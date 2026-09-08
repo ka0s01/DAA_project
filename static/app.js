@@ -97,7 +97,6 @@ async function init() {
 
   drawCity();
   buildCatalog();
-  fillRoadSel();
   syncControls();
   wireEvents();
 
@@ -198,6 +197,7 @@ function drawCity() {
       "text-anchor": "middle" }, PRIO[st.priority]));
     layers.stops.appendChild(grp);
     st._circle = c;
+    st._grp = grp;
     grp.addEventListener("mouseenter", () => tooltip(
       `<b>${esc(st.name)}</b> · ${PRIO[st.priority]} · service ${st.service} min` +
       (st.deadline ? ` · deadline ${fmtMin(st.deadline)}` : ""), st.x, st.y));
@@ -254,7 +254,6 @@ function paintDisruptions(disruptions) {
       "text-anchor": "middle", style: "font-size:17px;pointer-events:none" },
       d.kind === "roadblock" ? "⛔" : "🐢"));
   }
-  paintRoadSel();
 }
 
 async function toggleDisruption(rid, kind) {
@@ -299,13 +298,27 @@ function drawVan(pos) {
   layers.van.setAttribute("transform", `translate(${pos[0]},${pos[1]})`);
 }
 function paintStops() {
-  D.stops.forEach((st) => st._circle.classList.remove("done", "next"));
-  if (!state || state.phase === "idle") return;
-  const done = new Set((state.delivered || []).map((x) => x.stop));
-  D.stops.forEach((st) => { if (done.has(st.id)) st._circle.classList.add("done"); });
-  const nxt = state.etas && state.etas[0];
-  const c = nxt && D.stopById[nxt.stop];
-  if (c) c._circle.classList.add("next");
+  // dim any store that is NOT scheduled on the current route/plan, so a van that
+  // merely drives through a shop's intersection is not mistaken for a visit.
+  const live = state && (state.phase === "running" || state.phase === "paused");
+  const scheduled = new Set();
+  if (live) {
+    (state.delivered || []).forEach((d) => scheduled.add(d.stop));
+    (state.etas || []).forEach((et) => scheduled.add(et.stop));
+  } else if (plan && plan.stops) {
+    plan.stops.forEach((s) => scheduled.add(s.id));
+  }
+  const done = new Set((state && state.delivered || []).map((x) => x.stop));
+  D.stops.forEach((st) => {
+    st._circle.classList.remove("done", "next");
+    st._grp.style.opacity = scheduled.has(st.id) ? "" : "0.32";
+    if (done.has(st.id)) st._circle.classList.add("done");
+  });
+  if (live) {
+    const nxt = state.etas && state.etas[0];
+    const c = nxt && D.stopById[nxt.stop];
+    if (c) c._circle.classList.add("next");
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -429,60 +442,105 @@ function seqRow(pos, name, prio, when, extra, cls) {
 function renderRouteOrder() {
   const box = $("route-order");
   box.innerHTML = "";
-  if (!plan) return;
+  const ph = state && state.phase;
+  const live = ph === "running" || ph === "paused";
+  const done = ph === "done";
 
-  if (!state || state.phase === "idle") {
-    plan.stops.forEach((st, i) =>
-      box.appendChild(seqRow(i + 1, st.name, st.priority, null,
-        st.items ? `${st.items} it` : "")));
+  if (live) {
+    // actual live sequence: delivered (with arrival times) then remaining ETAs
+    let n = 0;
+    (state.delivered || []).forEach((d) => {
+      n++;
+      const late = d.late > 0 ? `⚠ ${d.late.toFixed(1)} late` : "";
+      box.appendChild(seqRow(n, d.name, d.priority, fmtMin(d.arrived), late,
+        "delivered" + (d.late > 0 ? " late" : "")));
+    });
+    (state.etas || []).forEach((et, i) => {
+      n++;
+      box.appendChild(seqRow(n, et.name, et.priority, "ETA " + fmtMin(et.eta_min), "",
+        i === 0 ? "next" : ""));
+    });
+    $("st-target").textContent = state.etas && state.etas.length
+      ? "→ " + state.etas[0].name : "heading home → DEPOT";
+    return;
+  }
+
+  // not live: always show the current plan's order (preview) as soon as it exists
+  if (plan && plan.stops && plan.stops.length) {
+    const recap = done && planMatchesRun();      // finished run, plan unchanged
+    const delivered = recap
+      ? new Map((state.delivered || []).map((d) => [d.stop, d]))
+      : null;
+    plan.stops.forEach((st, i) => {
+      let when = null, extra = "", cls = "";
+      if (st.items) extra = st.items === 1 ? "1 item" : st.items + " items";
+      if (recap && delivered.has(st.id)) {
+        const d = delivered.get(st.id);
+        when = fmtMin(d.arrived);
+        extra = d.late > 0 ? `⚠ ${d.late.toFixed(1)} late` : "✓ delivered";
+        cls = "delivered" + (d.late > 0 ? " late" : "");
+      }
+      box.appendChild(seqRow(i + 1, st.name, st.priority, when, extra, cls));
+    });
     $("st-target").textContent = "preview — dispatch to run";
     return;
   }
 
-  let n = 0;
-  (state.delivered || []).forEach((d) => {
-    n++;
-    box.appendChild(seqRow(n, d.name, d.priority, fmtMin(d.arrived),
-      d.late > 0 ? `⚠ ${d.late.toFixed(1)} late` : "", "delivered"));
-  });
-  (state.etas || []).forEach((et, i) => {
-    n++;
-    const cls = i === 0 ? "next" : "";
-    box.appendChild(seqRow(n, et.name, et.priority, "ETA " + fmtMin(et.eta_min), "", cls));
-  });
-  $("st-target").textContent = (state.etas && state.etas.length)
-    ? "→ " + state.etas[0].name : "heading home → DEPOT";
+  if (done) {                                   // finished auto-demo, no preview kept
+    (state.delivered || []).forEach((d, i) => {
+      box.appendChild(seqRow(i + 1, d.name, d.priority, fmtMin(d.arrived),
+        d.late > 0 ? `⚠ ${d.late.toFixed(1)} late` : "", "delivered" +
+        (d.late > 0 ? " late" : "")));
+    });
+    $("st-target").textContent = "run complete — back at DEPOT";
+    return;
+  }
+  box.appendChild(el("div", { class: "empty" }, "Plan a load to see the stop order."));
+}
+
+function planMatchesRun() {
+  const dlv = ((state && state.delivered) || []).map((d) => d.stop);
+  const ps = ((plan && plan.stops) || []).map((s) => s.id);
+  return ps.length > 0 && dlv.length === ps.length &&
+    dlv.every((id, i) => id === ps[i]);
 }
 function renderKpis() {
   if (!state) return;
   const done = (state.delivered || []).length;
   $("clock-pill").textContent = fmtMin(state.clock);
-  $("k-delivered").textContent = done;
   $("st-delivered").textContent = done;
-  $("st-remaining").textContent = state.phase === "done" ? 0 : Math.max(0, state.route_stop_total - done);
-  $("k-reroutes").textContent = state.stats.reroutes;
+  $("st-remaining").textContent = state.phase === "done" ? 0
+    : Math.max(0, state.route_stop_total - done);
   $("st-reroutes").textContent = state.stats.reroutes;
-  $("k-late").textContent = state.stats.late_stops;
-  $("k-min").textContent = state.phase === "done" ? Math.round(state.clock) : "…";
   $("st-eta").textContent = (state.phase === "done")
     ? fmtMin(state.clock)
     : (state.etas && state.etas[0] ? "ETA " + fmtMin(state.etas[0].eta_min) : "–");
-  const phase = state.phase || "idle";
+  const ph = state.phase || "idle";
   const pill = $("phase-pill");
-  pill.textContent = phase === "running" ? "● running"
-    : phase === "paused" ? "‖ paused"
-    : phase === "done" ? "■ done" : "idle";
-  pill.className = "pill " + phase;
+  pill.textContent = ph === "running" ? "● running"
+    : ph === "paused" ? "‖ paused"
+    : ph === "done" ? "■ done" : "idle";
+  pill.className = "pill " + ph;
+  syncRunButtons();
+  if (ph === "done") $("st-target").textContent = "run complete — back at DEPOT";
+}
+function syncRunButtons() {
+  const ph = state ? state.phase : "idle";
+  const live = ph === "running" || ph === "paused";
+  const pb = $("btn-playpause");
+  pb.disabled = !live;
+  pb.textContent = ph === "paused" ? "▶ Resume" : "⏸ Pause";
 }
 
 /* ------------------------------------------------------------------ */
 /* event log                                                           */
 /* ------------------------------------------------------------------ */
 function pushEvent(time, msg, kind = "info") {
+  if (kind === "info") return;   // service / pause chatter — not shown in the log
   const box = $("event-log");
   box.prepend(el("div", { class: `ev ${kind}` },
-    [el("span", { class: "t" }, time), el("span", {}, msg)]));
-  while (box.children.length > 150) box.removeChild(box.lastChild);
+    [el("span", { class: "t" }, time), el("span", { class: "m" }, msg)]));
+  while (box.children.length > 120) box.removeChild(box.lastChild);
 }
 function ingestEvents(events) {
   for (const e of events || []) {
@@ -514,21 +572,29 @@ function applyState(s) {
   renderRouteOrder();
   setBusy(runningPhase());
   if (s.phase === "running") setPolling(true);
-  else if (s.phase !== "idle") { setPolling(false); renderKpis(); }
+  else setPolling(false);
 }
 
 async function dispatch() {
   if (runningPhase()) return;
-  if (state && state.phase === "done") { lastEvt = 0; $("event-log").innerHTML = ""; }
+  $("event-log").innerHTML = "";   // start this run's log clean
+  lastEvt = 0;
   const res = await fetchJSON("/api/sim/start", { method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...readParams(), autoplay: true,
       timescale: +$("speed").value }) });
-  if (plan) plan = { ...plan, route: res.plan };
   applyState(res.sim);
   pushEvent("00:00",
-    `Dispatched — ${res.plan.k} stops · method ${res.plan.method} · travel ${res.plan.travel} min`,
+    `Dispatched — ${res.plan.k} stops · ${res.plan.method} · travel ${res.plan.travel} min`,
     "plan");
+}
+
+async function resetRun() {
+  const s = await fetchJSON("/api/reset", { method: "POST" });
+  lastEvt = 0;
+  plan = null;                    // clear preview; re-plan right after
+  applyState(s);
+  await planAndPreview();         // fresh preview with current sliders, no disruptions
 }
 
 async function postControl(action, timescale) {
@@ -539,31 +605,6 @@ async function postControl(action, timescale) {
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   applyState(s);
 }
-function selectedRid() { return $("road-sel").value; }
-function clearSelectedRoad() {
-  if (!selectedRid()) return;
-  const active = ((state && state.disruptions) || []).find((d) => d.id === selectedRid());
-  if (!active) { pushEvent(fmtMin(state ? state.clock : 0), "No active disruption there.", "warn"); return; }
-  toggleDisruption(selectedRid(), active.kind);
-}
-function paintRoadSel() {
-  const act = new Map((state && state.disruptions || []).map((d) => [d.id, d.kind]));
-  Array.from($("road-sel").options).forEach((o) => {
-    if (!o.value) return;
-    const k = act.get(o.value);
-    o.textContent = D.roadById[o.value].name +
-      (k === "roadblock" ? " ⛔ closed" : k === "traffic" ? " 🐢 traffic" : "");
-  });
-}
-function fillRoadSel() {
-  const sel = $("road-sel");
-  sel.innerHTML = "";
-  sel.appendChild(el("option", { value: "", disabled: "", selected: "" }, "choose a road…"));
-  const list = D.roads.filter((rd) => rd.kind === "bridge")
-    .concat(D.roads.filter((rd) => rd.kind !== "bridge"));
-  list.forEach((rd) => sel.appendChild(el("option", { value: rd.id }, rd.name)));
-}
-
 /* ------------------------------------------------------------------ */
 /* buttons                                                             */
 /* ------------------------------------------------------------------ */
@@ -585,6 +626,7 @@ function wireEvents() {
   });
   $("btn-plan").addEventListener("click", planAndPreview);
   $("btn-start").addEventListener("click", dispatch);
+  $("btn-reset").addEventListener("click", resetRun);
   $("btn-demo").addEventListener("click", autoDemo);
 
   $("btn-playpause").addEventListener("click", () => {
@@ -596,9 +638,6 @@ function wireEvents() {
     if (state && (state.phase === "running" || state.phase === "paused"))
       postControl(state.phase === "running" ? "play" : "pause", +$("speed").value);
   });
-  $("btn-rb").addEventListener("click", () => { if (selectedRid()) toggleDisruption(selectedRid(), "roadblock"); });
-  $("btn-tr").addEventListener("click", () => { if (selectedRid()) toggleDisruption(selectedRid(), "traffic"); });
-  $("btn-clear-rb").addEventListener("click", clearSelectedRoad);
 
   mapPanel.addEventListener("mousemove", moveTip);
   window.addEventListener("keydown", (e) => { if (e.key === "Escape") tipBox.style.display = "none"; });

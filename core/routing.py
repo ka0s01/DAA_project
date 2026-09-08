@@ -65,18 +65,30 @@ def plan_load(city: City, capacity: int, premium: float,
     }
 
 
-def select_route_stops(city: City, loaded_ids: Sequence[str], scope: str) -> List[str]:
-    """Which stops a route should visit, depending on the manager's scope choice."""
+def select_route_stops(city: City, loaded_ids: Sequence[str], scope: str = "loaded",
+                       open_ids: Optional[Sequence[str]] = None) -> List[str]:
+    """Which stops a route should visit, depending on the manager's scope choice.
+
+    ``loaded_ids`` are the stops the knapsack actually loaded cargo for.
+    ``open_ids`` (optional) are the stops that still have at least one item the
+    manager did *not* exclude from the catalogue. When given, a location whose
+    items were all unchecked is dropped from **every** scope — unchecking a whole
+    stop always removes it from the run.
+    """
+    avail: Optional[Set[str]] = set(open_ids) if open_ids else None
+
+    def open(sid: str) -> bool:
+        return avail is None or sid in avail
+
     if scope == "all":
-        return list(city.stop_ids)
+        # every location that still has a deliverable item (a full-city circuit)
+        return [s for s in city.stop_ids if open(s)]
     if scope == "critical":
-        # every stop that has at least one P1/P2 item loaded, plus all P1 stops
-        want = {s for s in loaded_ids if city.stops[s]["priority"] <= 2}
-        want |= {s for s in city.stop_ids if city.stops[s]["priority"] == 1}
-        order = [s for s in city.stop_ids if s in want]
-        return order
-    # 'loaded' (default)
-    return [s for s in city.stop_ids if s in set(loaded_ids)]
+        # only stops that actually received critical/high (P1/P2) cargo
+        want = {s for s in loaded_ids if city.stops[s]["priority"] <= 2 and open(s)}
+        return [s for s in city.stop_ids if s in want]
+    # 'loaded' (default): visit exactly the stops that received cargo
+    return [s for s in city.stop_ids if s in set(loaded_ids) and open(s)]
 
 
 # --------------------------------------------------------------------------- #

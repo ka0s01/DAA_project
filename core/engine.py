@@ -98,7 +98,7 @@ class DeliverySim:
         if rid in self.disruptions:
             road = self.city.roads[rid]
             del self.disruptions[rid]
-            self._log(f"All clear on {road['name']}", "info")
+            self._log(f"{road['name']} open again", "disruption")
             if self.phase in ("running", "paused") and self.poly:
                 self._maybe_reroute(f"{road['name']} reopened")
 
@@ -309,6 +309,37 @@ class DeliverySim:
                   f"{len(self.delivered)}/{len(self.route_stop_ids)} stops · "
                   f"{self._clock_str()} total", "done")
 
+    def reset(self) -> None:
+        """Back to a clean planning state: no run, no disruptions, empty log.
+
+        Keeps nothing — the manager's slider/checkbox choices live in the browser,
+        so the UI simply re-plans after a reset. Returns the engine to ``idle``.
+        """
+        self.disruptions.clear()
+        self.phase = "idle"
+        self.clock = 0.0
+        self._last_wall = None
+        self.load_plan = None
+        self.scope = "loaded"
+        self.strictness = self.cfg["strictness_default"]
+        self.route_stop_ids = []
+        self.poly, self.offs, self.stops_at = [], [], []
+        self.serve_order = []
+        self.delivered = []
+        self.pt = 0
+        self.travel = 0.0
+        self.dwell = False
+        self.dwell_stop = None
+        self.method = None
+        self.plan_total = self.plan_travel = None
+        self.history = []
+        self.stats = {"reroutes": 0, "travel_min": 0.0, "late_stops": 0, "late_min": 0.0}
+        self._script = []
+        self._last_reroute_clock = -10.0
+        self._ev_id = 0
+        self.log = []
+        self._seen = 0
+
     # ------------------------------------------------------------------ #
     # dynamic re-routing
     # ------------------------------------------------------------------ #
@@ -334,9 +365,10 @@ class DeliverySim:
         if rid is None:
             return
         d = self.disruptions[rid]
-        if self.clock - self._last_reroute_clock < 0.4:
-            return
         if d["kind"] == "traffic":
+            # anti-churn: only pause between traffic heuristics
+            if self.clock - self._last_reroute_clock < 0.4:
+                return
             # only bother if a genuinely better route exists
             old_remaining = self.offs[-1] - self.travel
             plan = self._plan_from_current()
@@ -345,7 +377,7 @@ class DeliverySim:
                           f"({old_remaining:.1f} min)", "reroute")
                 return
             self._reroute(reason, plan)
-        else:  # roadblock: mandatory
+        else:  # roadblock: mandatory — never skipped by the cooldown
             self._reroute(reason, self._plan_from_current())
 
     def _plan_from_current(self) -> dict:

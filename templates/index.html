@@ -15,6 +15,10 @@
     <div class="spacer"></div>
     <span class="pill">⏱ <b id="clock-pill">--:--</b></span>
     <span class="pill" id="phase-pill">idle</span>
+    <div class="head-speed" title="Simulation speed (sim-min per real second)">
+      <input type="range" id="speed" min="1" max="6" step="1" value="1">
+      <b id="speed-val">1×</b>
+    </div>
     <button class="btn-demo" id="btn-demo">▶ Run auto-demo</button>
   </header>
 
@@ -68,42 +72,22 @@
       <div id="tooltip"></div>
     </section>
 
-    <!-- ================= RIGHT · route & events ================= -->
+    <!-- ================= RIGHT · run controls ================= -->
     <section class="panel" id="route-panel">
-      <h2>3 · Dispatch &amp; watch</h2>
+      <h2>3 · Dispatch &amp; watch <span class="hint">click roads on the map to close · alt-click to slow</span></h2>
       <div class="scroll">
-        <button class="primary" id="btn-start">🚚 Dispatch van →</button>
-        <div class="seg" style="margin-bottom:8px">
-          <button id="btn-playpause">⏸ Pause</button>
-        </div>
-        <div class="ctl" style="margin:0">
-          <label class="row"><span>Simulation speed</span><b id="speed-val">1×</b></label>
-          <input type="range" id="speed" min="1" max="6" step="1" value="1">
+        <div class="runbtns">
+          <button class="primary" id="btn-start">🚚 Dispatch van</button>
+          <button class="ghost" id="btn-playpause" disabled>⏸ Pause</button>
+          <button class="ghost danger" id="btn-reset" title="Stop the run and clear all roadblocks / traffic">↺ Reset</button>
         </div>
 
-        <div class="kpis">
-          <div class="kpi"><div class="n" id="k-delivered">0</div><div class="l">delivered</div></div>
-          <div class="kpi"><div class="n" id="k-reroutes">0</div><div class="l">re-routes</div></div>
-          <div class="kpi late"><div class="n" id="k-late">0</div><div class="l">late stops</div></div>
-          <div class="kpi"><div class="n" id="k-min">0</div><div class="l">run mins</div></div>
-        </div>
-
-        <div class="ctl">
-          <label class="row"><span>Inject disruption on a road</span></label>
-          <select id="road-sel"></select>
-          <div class="mut-row">
-            <button class="btn-bad" id="btn-rb" title="Close this road — forces a re-route">⛔ Roadblock</button>
-            <button class="btn-amber" id="btn-tr" title="Slow this road ×3">🐢 Traffic</button>
-            <button class="ghost" id="btn-clear-rb" style="width:auto;padding:6px 8px;font-size:11.5px">Clear</button>
-          </div>
-        </div>
-
-        <h2 style="padding:8px 0 4px; border:none">Route sequence</h2>
-        <div class="stopseq" id="route-order"><div class="seqrow"><span class="nm" style="color:#94a3b8">Plan a load to see the stop order.</span></div></div>
+        <h2 style="padding:10px 0 4px; border:none">Route sequence</h2>
+        <div class="stopseq" id="route-order"><div class="empty">Plan a load to see the stop order.</div></div>
       </div>
       <div class="foot">
-        <h2 style="padding:0 0 6px; border:none">Event log</h2>
-        <div id="event-log" style="height:150px;overflow-y:auto"></div>
+        <h2 style="padding:0 0 4px; border:none">Event log</h2>
+        <div id="event-log"></div>
       </div>
     </section>
   </main>

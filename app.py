@@ -37,9 +37,16 @@ def _clamp(value, lo: float, hi: float, default: float) -> float:
 
 
 def _load_stops(capacity, premium, scope: str, excluded: Set[str]):
-    """Knapsack loading + stop selection → (load dict, ordered stop ids)."""
+    """Knapsack loading + stop selection → (load dict, ordered stop ids).
+
+    ``open_ids`` = stops that still have ≥1 item the manager did not exclude, so a
+    location whose items were all unchecked is dropped from every scope.
+    """
+    excluded = set(excluded or [])
+    open_ids = sorted({it["to"] for it in CITY.items if it["id"] not in excluded})
     load = R.plan_load(CITY, int(capacity), premium, excluded)
-    stops = R.select_route_stops(CITY, load["chosen_stop_counts"].keys(), scope)
+    stops = R.select_route_stops(CITY, load["chosen_stop_counts"].keys(), scope,
+                                 open_ids)
     return load, stops
 
 
@@ -196,7 +203,10 @@ def api_sim_start():
     excluded: Set[str] = set(data.get("excluded") or [])
     autoplay = bool(data.get("autoplay", False))
 
-    if data.get("clear_disruptions", True):
+    # Roadblocks/traffic the manager placed stay in force for the new run — only
+    # a reset (or the auto-demo endpoint) wipes them. Clearing them here silently
+    # made the van drive straight through roads the manager had just closed.
+    if data.get("clear_disruptions", False):
         SIM.disruptions.clear()
 
     _load, stop_ids = _load_stops(capacity, premium, scope, excluded)
@@ -225,6 +235,14 @@ def api_sim_control():
         except (TypeError, ValueError):
             timescale = None
     SIM.control(action, timescale)
+    return jsonify(SIM.snapshot())
+
+
+@app.post("/api/reset")
+def api_reset():
+    """Stop any run and clear every disruption/event — back to a clean planning
+    state. The browser keeps its sliders/checkboxes and re-plans afterwards."""
+    SIM.reset()
     return jsonify(SIM.snapshot())
 
 

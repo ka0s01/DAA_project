@@ -94,6 +94,7 @@ The dashboard has three panels. Workflows flow **left → centre → right**.
 | --- | --- |
 | clock `⏱` | simulated time of the current run (mm:ss) |
 | phase pill | `idle` (no run yet — preview only) · `‖ paused` · `● running` · `■ done` |
+| **speed** slider | how many sim-minutes tick per real second (1×–6×, §5.5) |
 | **▶ Run auto-demo** | one-click canned demo (§6.4). **WARNING:** it *ignores your sliders/checkboxes* and resets to the default scenario. |
 
 ### 4.2 LEFT panel — "1 · Plan the load"
@@ -127,14 +128,13 @@ button just forces that same refresh. It appears to "do nothing" when:
 
 | scope | the route may visit |
 | --- | --- |
-| **Loaded stops** | only stops that received ≥ 1 item from the knapsack (the sensible default) |
-| **Every stop** | all 12 candidate stops, even ones with no cargo (a full-city tour demo) |
-| **Critical only** | stops receiving a loaded P1/P2 item **plus every P1 stop, even if it has no cargo** |
+| **Loaded stops** | only stops that actually received ≥ 1 item from the knapsack (the sensible default) |
+| **Every stop** | every stop that still has at least one un-excluded item (a full-city circuit) |
+| **Critical only** | only stops that received **critical/high (P1/P2)** cargo |
 
-That last line is the reason Fire Station didn't disappear when you unchecked
-its items (see §6.2). "Critical only" means *"I always want the critical places
-covered"* — so it forces the P1 *stops* regardless of whether you loaded their
-items.
+One rule applies to **all three**: uncheck *every* item at a location and it is
+dropped from the run, period. (Early builds forced P1 stops even when nothing was
+loaded — that behaviour is gone, see §6.2.)
 
 ### 4.3 CENTRE panel — "2 · Route map"
 An SVG of the city. Symbols:
@@ -149,7 +149,8 @@ Route lines:
 - **faded dashed** = a "ghost" of an old route after the van re-routed
 
 The van is the little black dot; the stop it's heading to **pulses**; delivered
-stops turn **grey**.
+stops turn **grey**; and any store that is **not** on the current route is dimmed,
+so a van merely driving through a junction is not mistaken for a delivery.
 
 **Clicking roads is the disruption system:**
 - **click** a road → toggles a **roadblock** (⛔)
@@ -160,15 +161,16 @@ If you do this *before* dispatch, the next plan simply routes around it. If you
 do it *while the van is driving*, it triggers a live re-route (§5.4).
 
 ### 4.4 RIGHT panel — "3 · Dispatch & watch"
+Deliberately minimal: three buttons, the route sequence, and a plain event log.
+Disruptions are injected straight on the map (§4.3) — there is no dropdown.
+
 | control | what it does |
 | --- | --- |
-| **🚚 Dispatch van** | starts a live run using the *current* sliders/scope/exclusions (§4.5). Disabled while a run is live. |
-| Pause/Resume | freezes / unfreezes the simulated clock |
-| **Simulation speed** (1–6×) | how many sim-minutes per real second (§5.5) |
-| KPI cards | delivered count · number of re-routes · late stops · run minutes |
-| disruption dropdown + ⛔/🐢/Clear | same as clicking roads, but by picking from a list |
-| **Route sequence** | the stops in visit order. Delivered rows show their arrival time + ✓ (and "⚠ X late" if late); remaining rows show projected ETA. Reorder on a re-route. |
-| **Event log** (bottom, newest on top) | a timestamped narration of everything: plan → disruption → re-route → each delivery → done. Colour-coded by type. **Read this to understand what the algorithms are doing.** |
+| **🚚 Dispatch van** | starts a live run using the *current* sliders/scope/exclusions (§4.5). Roadblocks/traffic you placed on the map **stay in force** — the run is planned around them. Disabled while a run is live. |
+| **⏸ Pause / ▶ Resume** | freezes / unfreezes the simulated clock |
+| **↺ Reset** | stops the run, clears every roadblock/traffic, empties the event log, and re-plans a clean preview. Your sliders/checkboxes are kept. |
+| **Route sequence** | always shows the stop order. Before dispatch it's the live preview and updates the moment you move a slider or place a roadblock; during a run it lists each stop with its ✓ / ETA and reorders after a re-route. |
+| **Event log** | plain `time — message` rows (disruption → re-route → deliveries → done). The chatty "arrived / servicing / paused" lines are hidden so it reads like a delivery log, not engine noise. |
 
 ### 4.5 Dispatch = commit, not preview
 This is the key mental model:
@@ -176,7 +178,8 @@ This is the key mental model:
 - **Dispatch** sends those same settings to the server, which re-runs the knapsack
   and TSP, and starts the van driving the result.
 
-So a dispatch and its preview always agree *if the settings are identical*.
+So a dispatch and its preview always agree *if the settings are identical* —
+including any roadblocks/traffic you placed (Dispatch no longer clears them).
 
 ---
 
@@ -264,27 +267,26 @@ earlier, or **crank λ up** when you want to *show* the priority trade-off on
 purpose. The event log and REPORT.md §7.4 spell out the cost.
 
 ### 6.2 "I unchecked all of Fire Station's items and the van still went there."
-Three possible reasons — two are intended, one is a visual illusion:
-1. **You were on "Critical only" scope.** That scope *forces* every P1 stop even
-   if it carries nothing. Switching to **Loaded stops** fixes it (verified: the
-   route drops Fire Station, 8 stops).
+That was a real bug in early builds ("Critical only" forced P1 stops even with
+nothing loaded) — it's fixed: uncheck every item at a location and it is dropped
+from the run in **every** scope. If the van still looks like it goes there, one of
+these is going on:
+1. **The van drove *through* the intersection without stopping.** Fire Station
+   sits on a junction that some roads pass through, and the truck rolls past its
+   node on the way somewhere else. Stores **not on the current route are now
+   dimmed** on the map, and the **Route sequence / event log are the source of
+   truth**: a stop is only visited when the log says "Delivered …".
 2. **You pressed ▶ Run auto-demo.** Auto-demo deliberately resets to the default
-   load and ignores your checkboxes. Use **🚚 Dispatch** if you want your load.
-3. **The van drove *through* the intersection without stopping.** Fire Station
-   sits on the road between other stops, so the truck rolls past its node. On the
-   map that *looks* like a visit, but the event log never says "Delivered City
-   Fire Station". Look at the **✓ / delivered markers** and the log, not the
-   van's path, to tell "visited" from "drove past".
-
-If you *loaded* no items to a stop and are on **Loaded stops**, that stop is not
-in the run — excluding its items does remove it (verified).
+   load and ignores your checkboxes. Use **🚚 Dispatch** to run *your* load.
 
 ### 6.3 "The Re-plan button doesn't seem to do anything."
 It works; it's just *redundant* most of the time:
-- moving a slider or checking/unchecking an item **already auto-plans** ~150 ms
-  later, so by the time you click, nothing is left to change;
+- moving a slider, changing scope, or checking/unchecking an item **already
+  auto-plans** ~150 ms later (the route sequence updates too), so by the time you
+  click, nothing is left to change;
 - during a live run it's **disabled by design** (you shouldn't re-plan a van
-  that's already driving). Finish the run (phase → `■ done`) and it re-enables.
+  that's already driving). Use **↺ Reset** to stop, or finish the run
+  (phase → `■ done`) and it re-enables.
 
 ### 6.4 "Why did auto-demo do its own thing?"
 **Run auto-demo** = a scripted demonstration, not "use my current plan". It
@@ -294,15 +296,13 @@ bridge on the route to close just before the van reaches it — so you are
 "dynamic re-routing" story; use **Dispatch** to run *your* plan.
 
 ### 6.5 Anything actually wrong / inconsistent right now?
-A few cosmetic / clarity gaps (no crashes, verified tests all green):
-- "Critical only" forcing empty P1 stops is easy to misread (see §6.2). We can
-  change it to only cover stops that have critical cargo, if you prefer.
-- λ = 4 as the default makes routes look needlessly zig-zaggy to a first-time
-  viewer. We can lower the default to ~1.5 so it still prioritises but looks sane.
-- The map doesn't visually distinguish "van drove past a stop's intersection"
-  from "van delivered here". We could make delivered stops pop more.
-- None of these are *bugs* in the algorithms — `algo_tests.py` checks knapsack
-  and Held–Karp against brute-force oracles and everything passes.
+No known bugs — `algo_tests.py` (13 checks) and the live demo both pass, and a
+roadblock placed before Dispatch is now honoured (it used to be silently cleared
+the moment you dispatched). Two **by-design trade-offs** are worth remembering:
+- λ = 4 as the default makes routes look deliberately zig-zaggy; dial λ down to
+  ~1–2 (§7) for a more natural-looking route.
+- "Every stop" scope intentionally visits every store that still has a
+  deliverable item, even if the knapsack chose none of that store's items.
 
 ---
 
@@ -317,9 +317,9 @@ If you're unsure what's "right", here's a sensible way to think about it:
   - λ ≈ 1–2 → mostly natural route, slight priority nudge (**good default for a
     demo that should "look smart"**).
   - λ ≥ 4 → visibly critical-first, shows the trade-off on purpose.
-- **Loaded stops** scope is the intuitive default. "Critical only" is a
-  "must-cover the critical places" mode. "Every stop" is a showcase of the full
-  city circuit.
+- **Loaded stops** scope is the intuitive default. **Critical only** narrows the
+  run to just the stops that got P1/P2 cargo (a tight, high-stakes circuit).
+  **Every stop** is a showcase of the full city circuit.
 - **Watch the event log** — it narrates *why* the van does what it does
   ("traffic on X — current route still best", "Re-routing… detour adds ~7.7 min").
 
@@ -357,6 +357,5 @@ Suggested first browser session (≈1 minute, no explaining needed):
 - REPORT.md is the submission document — **fill in your name / course / dates** at
   the top before handing it in.
 
-If after reading this you'd like any of the three changes in §6.5 (softer default
-λ, "Critical only" that follows exclusions, or clearer delivered-vs-passed
-visuals), just say which and I'll make them.
+If you'd like the default λ softened (so the route looks more natural out of the
+box) or any other default tweaked, just say which and I'll change it.
