@@ -147,8 +147,15 @@ def solve_route(city: City, disruptions: Dict[str, dict],
     engine passes the van's current node so the route is re-planned from where it
     actually is, while ``home_node`` stays the depot.
 
-    Returns plan details including visit order (stop ids), the objective split and
-    which solver produced the answer.
+    **Reachability guard.** Disruptions can *sever* the graph — the city is cut by
+    a river with only two bridges, so roadblocking both leaves every stop on the
+    far bank with no road path from the van. Rather than let the TSP DP raise on
+    the resulting ``inf`` distances, stops that are no longer reachable are dropped
+    from the tour and returned in ``unreachable``, and an unreachable depot yields
+    an empty plan. Callers surface both to the manager instead of erroring.
+
+    Returns plan details including visit order (stop ids), the objective split,
+    which solver produced the answer, and any stops dropped as unreachable.
     """
     depot = city.depot
     if start_node is None:
@@ -156,6 +163,25 @@ def solve_route(city: City, disruptions: Dict[str, dict],
     if home_node is None:
         home_node = depot
     node2stop = stop_by_node(city)
+
+    # --- reachability guard (see docstring) ---
+    INF = float("inf")
+    dist_from_start, _ = alg.dijkstra(city.adjacency(disruptions), start_node)
+    reachable: List[str] = []
+    unreachable: List[str] = []
+    for sid in stop_ids:
+        if dist_from_start[city.stops[sid]["node"]] < INF:
+            reachable.append(sid)
+        else:
+            unreachable.append(sid)
+    all_stops = list(stop_ids)
+    stop_ids = reachable
+
+    # Van cut off from the depot: no closed tour exists, so don't even try.
+    if stop_ids and dist_from_start[home_node] == INF:
+        return {"order": [], "order_nodes": [], "method": "unreachable", "k": 0,
+                "travel": 0.0, "penalty": 0.0, "total": 0.0, "unreachable": all_stops,
+                "matrix": [], "nodes": [], "start_i": 0, "home_i": 0}
 
     # Deduplicated node universe: [start] + [home] + each stop's node.
     nodes: List[int] = []
@@ -177,7 +203,7 @@ def solve_route(city: City, disruptions: Dict[str, dict],
 
     if k == 0:
         return {"order": [], "order_nodes": [], "method": method, "k": 0,
-                "travel": 0.0, "penalty": 0.0, "total": 0.0,
+                "travel": 0.0, "penalty": 0.0, "total": 0.0, "unreachable": unreachable,
                 "matrix": matrix, "nodes": nodes, "start_i": start_i, "home_i": home_i}
 
     if method == "held_karp":
@@ -207,6 +233,7 @@ def solve_route(city: City, disruptions: Dict[str, dict],
         "travel": parts["travel"],
         "penalty": parts["penalty"],
         "total": parts["total"],
+        "unreachable": unreachable,
         "matrix": matrix,
         "nodes": nodes,
         "start_i": start_i,

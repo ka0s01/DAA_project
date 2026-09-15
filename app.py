@@ -74,6 +74,47 @@ def _warnings(load: dict, scope: str) -> List[str]:
     return warns
 
 
+def _blocked_bridges() -> List[str]:
+    """Display names of every bridge currently roadblocked."""
+    return [CITY.roads[rid]["name"] for rid, d in SIM.disruptions.items()
+            if d.get("kind") == "roadblock"
+            and CITY.roads[rid]["kind"] == "bridge"]
+
+
+def _river_alert() -> Optional[str]:
+    """Warning shown as a popup when every river crossing is closed.
+
+    The river splits the city and only the bridges cross it, so roadblocking all
+    of them severs the graph: stops on the far bank have no road path from the
+    van, and no route can serve them. Returned to the browser (which pops it up)
+    instead of letting the TSP fail with a 500.
+    """
+    total = sum(1 for rd in CITY.roads.values() if rd["kind"] == "bridge")
+    blocked = _blocked_bridges()
+    if total and len(blocked) >= total:
+        return (f"Both bridges are blocked ({' and '.join(blocked)}) — the river "
+                f"cuts the city in two, so stops on the far bank can't be reached. "
+                f"Reopen a bridge to plan again.")
+    return None
+
+
+def _unreachable_names(plan: dict) -> List[str]:
+    """Names of stops the solver had to drop because no road path reaches them."""
+    return [CITY.stops[sid]["name"] for sid in plan.get("unreachable", [])]
+
+
+def _snap() -> dict:
+    """Sim snapshot plus the manager-facing connectivity alert.
+
+    Attached here rather than in ``DeliverySim.snapshot()`` so the core engine
+    stays free of UI wording. Every endpoint that hands the browser a state
+    returns this, which is what keeps the popup in sync with the map.
+    """
+    snap = SIM.snapshot()
+    snap["alert"] = _river_alert()
+    return snap
+
+
 # --------------------------------------------------------------------------- #
 # data + planning
 # --------------------------------------------------------------------------- #
@@ -136,6 +177,13 @@ def api_plan():
     disruptions = SIM.disruptions
     plan = R.solve_route(CITY, disruptions, stop_ids, strictness)
 
+    # Stops the solver had to drop (no road path) — surfaced, never silent.
+    warns = _warnings(load, scope)
+    dropped = _unreachable_names(plan)
+    if dropped:
+        warns.append(f"{len(dropped)} stop(s) unreachable — dropped from the "
+                     f"route: {', '.join(dropped[:4])}")
+
     stop_details = []
     for sid in plan["order"]:
         st = CITY.stops[sid]
@@ -172,7 +220,9 @@ def api_plan():
             "total": round(plan["total"], 1),
         },
         "path": _closed_path(plan, disruptions),
-        "warnings": _warnings(load, scope),
+        "warnings": warns,
+        "alert": _river_alert(),
+        "unreachable": dropped,
     })
 
 
@@ -183,7 +233,7 @@ def api_plan():
 def api_sim_state():
     """Full sim snapshot; each poll also advances the simulated clock by the real
     wall-clock time elapsed × timescale, which is what makes the demo run live."""
-    return jsonify(SIM.snapshot())
+    return jsonify(_snap())
 
 
 @app.post("/api/sim/start")
@@ -220,7 +270,9 @@ def api_sim_start():
                  "travel": round(plan["travel"], 1),
                  "penalty": round(plan["penalty"], 1),
                  "total": round(plan["total"], 1)},
-        "sim": SIM.snapshot(),
+        "alert": _river_alert(),
+        "unreachable": _unreachable_names(plan),
+        "sim": _snap(),
     })
 
 
@@ -235,7 +287,7 @@ def api_sim_control():
         except (TypeError, ValueError):
             timescale = None
     SIM.control(action, timescale)
-    return jsonify(SIM.snapshot())
+    return jsonify(_snap())
 
 
 @app.post("/api/reset")
@@ -243,7 +295,7 @@ def api_reset():
     """Stop any run and clear every disruption/event — back to a clean planning
     state. The browser keeps its sliders/checkboxes and re-plans afterwards."""
     SIM.reset()
-    return jsonify(SIM.snapshot())
+    return jsonify(_snap())
 
 
 # --------------------------------------------------------------------------- #
@@ -269,7 +321,7 @@ def api_disrupt():
     if kind not in ("roadblock", "traffic"):
         return jsonify({"ok": False, "error": "kind must be roadblock|traffic"}), 400
     SIM.add_disruption(rid, kind, factor=data.get("factor"))
-    return jsonify({"ok": True, "sim": SIM.snapshot()})
+    return jsonify({"ok": True, "alert": _river_alert(), "sim": _snap()})
 
 
 @app.post("/api/disrupt/clear")
@@ -279,7 +331,7 @@ def api_disrupt_clear():
     if rid not in CITY.roads:
         return jsonify({"ok": False, "error": f"unknown road {rid!r}"}), 404
     SIM.clear_disruption(rid)
-    return jsonify({"ok": True, "sim": SIM.snapshot()})
+    return jsonify({"ok": True, "sim": _snap()})
 
 
 # --------------------------------------------------------------------------- #
@@ -314,14 +366,14 @@ def api_demo_scenario():
     if chosen is None:
         return jsonify({"ok": False,
                         "error": "planned route crosses no bridge — manual demo only",
-                        "sim": SIM.snapshot()}), 409
+                        "sim": _snap()}), 409
 
     rid, at = chosen
     SIM.add_scripted_event(at, rid, "roadblock")
     SIM.control("play")
     return jsonify({"ok": True, "roadblock": {"rid": rid, "at": at,
                                               "name": CITY.roads[rid]["name"]},
-                    "sim": SIM.snapshot()})
+                    "sim": _snap()})
 
 
 if __name__ == "__main__":

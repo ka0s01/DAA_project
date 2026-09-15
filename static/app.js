@@ -60,6 +60,8 @@ let plan = null;                  // last /api/plan result
 let state = null;                 // last /api/sim/state snapshot
 let lastEvt = 0;                  // highest server event id we've shown
 let pollTimer = null;
+let alertDismissed = null;        // message text the manager closed, so a poll
+                                  // doesn't immediately re-open the same popup
 const runningPhase = () => state && (state.phase === "running" || state.phase === "paused");
 
 const layers = {};                // svg layers inside #world
@@ -94,6 +96,7 @@ async function init() {
   const snap = await fetchJSON("/api/sim/state");
   lastEvt = Math.max(0, ...(snap.events || []).map((e) => e.id));
   state = { ...snap, events: [] };
+  showAlert(snap.alert);           // disruptions may have survived a reload
 
   drawCity();
   buildCatalog();
@@ -106,6 +109,23 @@ async function init() {
               "plan");
     renderRouteOrder();
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* warning popup                                                       */
+/* ------------------------------------------------------------------ */
+/* The server attaches an `alert` string to every sim snapshot when the
+ * road network is severed (both river bridges closed). Dismissing hides it
+ * until the condition clears and comes back — see alertDismissed above. */
+function showAlert(msg) {
+  const box = $("alert-pop");
+  if (!msg) {                       // condition cleared → re-arm the popup
+    box.hidden = true;
+    alertDismissed = null;
+    return;
+  }
+  $("alert-msg").textContent = msg;
+  box.hidden = alertDismissed === msg;
 }
 
 /* ------------------------------------------------------------------ */
@@ -566,6 +586,7 @@ function applyState(s) {
   ingestEvents(s.events);
   renderKpis();
   paintDisruptions(s.disruptions);
+  showAlert(s.alert);
   drawRoute();
   drawVan(s.pos);
   paintStops();
@@ -628,6 +649,10 @@ function wireEvents() {
   $("btn-start").addEventListener("click", dispatch);
   $("btn-reset").addEventListener("click", resetRun);
   $("btn-demo").addEventListener("click", autoDemo);
+  $("alert-close").addEventListener("click", () => {
+    alertDismissed = $("alert-msg").textContent;
+    $("alert-pop").hidden = true;
+  });
 
   $("btn-playpause").addEventListener("click", () => {
     if (!state || state.phase === "idle" || state.phase === "done") return;

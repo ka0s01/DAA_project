@@ -123,6 +123,30 @@ main {
   z-index: 30; box-shadow: 0 2px 8px rgba(0,0,0,.25);
 }
 
+/* ---------- warning popup (e.g. both bridges closed) ---------- */
+.alert-pop {
+  position: absolute; top: 54px; left: 50%; transform: translateX(-50%);
+  z-index: 40; display: flex; align-items: flex-start; gap: 9px;
+  max-width: 460px; padding: 10px 12px;
+  background: var(--p1-bg); color: #8f1f26;
+  border: 1px solid #f0b4b8; border-left: 4px solid var(--bad);
+  border-radius: 8px; font-size: 13px; line-height: 1.4;
+  box-shadow: 0 6px 20px rgba(15,23,42,.18);
+  animation: alert-in .18s ease-out;
+}
+.alert-pop[hidden] { display: none; }
+.alert-ico { font-size: 15px; line-height: 1.15; }
+.alert-x {
+  margin-left: auto; padding: 0 2px; border: 0; background: none;
+  font: inherit; font-size: 17px; line-height: 1; color: inherit;
+  opacity: .6; cursor: pointer;
+}
+.alert-x:hover { opacity: 1; }
+@keyframes alert-in {
+  from { opacity: 0; transform: translate(-50%, -6px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
 /* ---------- svg map layers ---------- */
 svg text { font-family: "Segoe UI", system-ui, sans-serif; }
 .river {

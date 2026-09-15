@@ -62,6 +62,11 @@
     <section class="panel" id="map-panel">
       <h2>2 · Route map <span class="hint">click a road → roadblock · alt-click → traffic</span></h2>
       <div id="map-wrap"></div>
+      <div class="alert-pop" id="alert-pop" hidden role="alert">
+        <span class="alert-ico" aria-hidden="true">⚠</span>
+        <span id="alert-msg"></span>
+        <button class="alert-x" id="alert-close" title="Dismiss" aria-label="Dismiss">×</button>
+      </div>
       <div class="statusbar">
         <span>📍 <b id="st-target">no run</b></span>
         <span>🚚 <b id="st-remaining">–</b> left</span>
