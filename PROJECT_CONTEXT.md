@@ -7,10 +7,11 @@
 > required format, without needing to re-read the source.
 >
 > **How to use it.** Treat this file as the raw material / source of truth. Numbers
-> in §13 and §16 were produced by actually running the code in this repository —
-> cite them rather than inventing new ones. §20 is a ready-made mapping from common
-> report sections to the sections of this file that supply them. §21 lists the
-> personal details a report must fill in (name, course, date).
+> in §15 and §16 were produced by actually running the code in this repository —
+> cite them rather than inventing new ones. §24 is a ready-made mapping from common
+> report sections to the sections of this file that supply them. §25 lists the
+> personal details a report must fill in (name, course, date), and §26 holds two
+> ready-to-paste Mermaid diagrams (architecture and workflow).
 >
 > **Related documents in the repo:** `README.md` (quick orientation), `REPORT.md`
 > (an existing DAA write-up already in report prose), `GUIDE.md` (plain-English
@@ -46,6 +47,7 @@
 23. [How to build, run and reproduce](#23-how-to-build-run-and-reproduce)
 24. [Mapping to typical report sections](#24-mapping-to-typical-report-sections)
 25. [Details the report must fill in](#25-details-the-report-must-fill-in)
+26. [Diagrams (Mermaid)](#26-diagrams-mermaid)
 
 ---
 
@@ -1619,9 +1621,9 @@ If the required report format uses different headings, draw the material from he
 | Dataset description | §5 (geometry, bridges, stops table, item catalogue, config) |
 | Algorithm design & analysis | §6 knapsack, §7 Dijkstra, §8 Held–Karp, §9 heuristic |
 | NP-hardness / complexity discussion | §2.2, §18 |
-| System architecture | §10 planning layer, §11 engine, §12 API, §13 UI |
+| System architecture | §10 planning layer, §11 engine, §12 API, §13 UI, **§26.1 diagram** |
 | Implementation details | §10–§13, §22 (file map) |
-| Key/novel contribution | §8.3 (position cost keeps the DP exact), §4.4–4.5 (coupling), §11.4 (re-route policy) |
+| Key/novel contribution | §8.3 (position cost keeps the DP exact), §4.4–4.5 (coupling), §11.4 (re-route policy), **§26.2 diagram** |
 | Experiments, results, tables | §15 (all seven tables) + §16 (end-to-end transcript) |
 | Testing / verification | §17, §15 [6], §15 [7] |
 | Discussion of trade-offs | §19 |
@@ -1648,3 +1650,182 @@ The code and this document cannot supply these; they come from the student:
 
 *Every number in this document was produced by running the code in this repository on
 the deterministic dataset described in §5. Re-run §23's commands to reproduce them.*
+
+---
+
+## 26. Diagrams (Mermaid)
+
+Two diagrams, ready to paste into a report that accepts Mermaid (GitHub, GitLab,
+Notion, Obsidian, Typora, VS Code preview, mermaid.live all render these as-is). If
+the required format wants images instead, render each block at mermaid.live and export
+PNG/SVG — the source stays the same.
+
+### 26.1 System architecture
+
+Shows the layering that the design deliberately enforces: **nothing below `app.py`
+knows that Flask exists**, which is what keeps the algorithmic core headless-testable.
+Data flows up (results → HTTP → DOM); the only downward request path is the browser's
+JSON call, and the only algorithmic re-entry is the engine asking the planning layer
+to re-plan mid-run.
+
+```mermaid
+flowchart TB
+    subgraph BROWSER["Browser — single page, no framework, no build step"]
+        HTML["templates/index.html<br/>three-panel layout"]
+        JS["static/app.js<br/>render + interaction"]
+        SVG["Inline SVG city map<br/>roads · stops · route · van · badges"]
+        HTML --- JS
+        JS --> SVG
+    end
+
+    subgraph WEB["app.py — Flask HTTP layer (thin: contains no algorithms)"]
+        EPS["REST endpoints<br/>/api/data · /api/plan<br/>/api/sim/start · /api/sim/state<br/>/api/sim/control · /api/reset<br/>/api/disrupt · /api/disrupt/clear<br/>/api/demo/scenario"]
+        GUARD["Input handling<br/>_clamp ranges · scope validation"]
+        DIAG["UI diagnostics<br/>_warnings · _unreachable_names · _river_alert"]
+        SING["Process singletons<br/>CITY · SIM"]
+        EPS --> GUARD
+        EPS --- DIAG
+        EPS --- SING
+    end
+
+    subgraph CORE["core/ — imports no Flask, fully headless-testable"]
+        ROUT["routing.py · planning layer<br/>plan_load · select_route_stops<br/>build_matrix · solve_route · route_geometry"]
+        ENG["engine.py · DeliverySim<br/>clock · polyline · dwell · event log<br/>re-route policy · snapshot"]
+        ALG["algorithms.py · pure algorithms<br/>knapsack_01 · dijkstra · shortest_path<br/>tsp_held_karp · tsp_nearest_neighbor_2opt"]
+        CITY["city.py · the world<br/>City.adjacency(disruptions)<br/>build_city() · CONFIG"]
+        ENG -->|"re-plan from van's current node"| ROUT
+        ENG --> CITY
+        ROUT -->|"load: capacity + premium"| ALG
+        ROUT -->|"pairwise times: k+2 Dijkstra runs"| ALG
+        ROUT -->|"order: exact DP, else NN+2-opt"| ALG
+        ROUT --> CITY
+        ALG -.->|"disruption-aware adjacency"| CITY
+    end
+
+    subgraph HEADLESS["Headless entry points (no browser, same core)"]
+        DC["demo_cli.py<br/>narrative run + smoke asserts"]
+        AT["algo_tests.py<br/>13 checks"]
+        EX["experiments.py<br/>report tables"]
+        DC --> ENG
+        DC --> ROUT
+        AT --> ALG
+        AT --> CITY
+        EX --> ROUT
+        EX --> ALG
+    end
+
+    JS -->|"fetch JSON · poll /api/sim/state every 450 ms while running"| EPS
+    GUARD --> ROUT
+    GUARD --> ENG
+    SING --- ENG
+```
+
+**How to read it.** Five blocks. The browser holds no logic beyond rendering and
+polling. `app.py` translates HTTP and clamps input, but every decision is made below
+it. `core/` is the project: `routing.py` is the only module that knows about
+*objectives*, `engine.py` owns time and disruption handling, `algorithms.py` is pure
+and problem-agnostic (it has never heard of a "stop" or a "priority"), and `city.py`
+owns the graph and honours disruptions in `adjacency()`. The three headless entry
+points run the identical core, which is why `demo_cli.py`, `algo_tests.py` and
+`experiments.py` can verify the same behaviour the dashboard shows.
+
+### 26.2 Workflow / flowchart
+
+The full lifecycle, from page load to a finished run — including the two decision
+points that carry the project's argument: the **exactness guard** (`k ≤ 12`?) and the
+**re-route policy** (roadblock mandatory vs traffic only-if-better).
+
+```mermaid
+flowchart TD
+    A(["Manager opens the dashboard"]) --> B["GET /api/data — draw grid, river,<br/>roads, stops, item catalogue"]
+    B --> C["POST /api/plan — preview only, no van moves"]
+
+    subgraph PLAN["Planning pipeline (core/routing.py)"]
+        direction TB
+        C1["plan_load — knapsack_01 O(n·W)<br/>value = v + premium·(3 − priority)"]
+        C2["select_route_stops<br/>scope: loaded / critical / all"]
+        C3["Dijkstra from the start node<br/>reachability guard"]
+        Q1{"Any stop no longer<br/>reachable by road?"}
+        C4["build_matrix<br/>k+2 Dijkstra runs over the<br/>disruption-aware graph"]
+        Q2{"k ≤ 12 stops?"}
+        C5["tsp_held_karp — exact O(k²·2^k)<br/>objective = travel + λ·Σ pw·position"]
+        C6["tsp_nearest_neighbor_2opt<br/>approximate O(k²), travel only"]
+        C7["recompute travel / penalty / total<br/>draw dashed preview + stop sequence"]
+        C1 --> C2 --> C3 --> Q1
+        Q1 -->|"yes — river severed"| W1["drop those stops, warn the manager<br/>both bridges closed → popup alert"]
+        Q1 -->|no| C4
+        W1 --> C4
+        C4 --> Q2
+        Q2 -->|yes| C5
+        Q2 -->|no| C6
+        C5 --> C7
+        C6 --> C7
+    end
+
+    C --> C1
+    C7 --> D1{"Dispatch the van?"}
+    D1 -->|"no — adjust capacity / premium / λ /<br/>scope / item checkboxes"| C
+    D1 -->|"Dispatch van"| E["POST /api/sim/start<br/>plan from depot, phase = paused"]
+    E --> F["play — phase = running"]
+    F --> G["tick: clock += real elapsed × timescale"]
+
+    subgraph RUN["Live run (core/engine.py)"]
+        direction TB
+        H{"Van state?"}
+        I["dwelling — serve for the stop's<br/>service minutes, then record arrival<br/>and lateness vs deadline"]
+        J["driving — advance along the<br/>road polyline"]
+        K{"Re-validating at a stop,<br/>with disruptions active?"}
+        M{"Is the disruption on a road<br/>still AHEAD of the van?"}
+        N{"Disruption kind?"}
+        O["mandatory re-plan"]
+        P["re-plan, then compare cost"]
+        Q3{"new travel < old remaining − 0.6 min?"}
+        R["log 'current route still best' —<br/>keep driving, no churn"]
+        S["solve_route(start = van's node,<br/>home = depot, remaining stops)"]
+        T["rebuild polyline, keep the old route<br/>as a ghost, log 'detour adds ~X min'"]
+        G --> H
+        H -->|dwelling| I
+        H -->|driving| J
+        I --> K
+        J --> K
+        K -->|no| L["keep driving"]
+        K -->|yes| M
+        M -->|no| L
+        M -->|yes| N
+        N -->|"roadblock"| O
+        N -->|"traffic"| P
+        P --> Q3
+        Q3 -->|no| R
+        Q3 -->|yes| O
+        R --> L
+        O --> S --> T --> L
+    end
+
+    X1(["Manager clicks a road on the map<br/>click = roadblock · alt-click = traffic"]) --> Y
+    X2(["Auto-demo scripted event fires<br/>at its scheduled sim-time"]) --> Y
+    Y["POST /api/disrupt → add_disruption<br/>roadblock removes the edges ·<br/>traffic multiplies the road time"] --> M
+
+    L --> U{"Last polyline node reached?"}
+    U -->|no| G
+    U -->|yes| V(["phase = done · van back at DEPOT<br/>delivered list, re-route count, late stops"])
+```
+
+**How to read it.** Top half is the planning pipeline, which runs as a pure preview —
+nothing moves until Dispatch. The `k ≤ 12` diamond is the exactness guard: the
+Held–Karp DP is the default and the only solver that optimises priority, and the
+2-opt fallback is used past the cap. Bottom half is the live run: the engine alternates
+driving and dwelling, and re-validates the route whenever a disruption sits on a road
+still ahead. The `roadblock → mandatory` / `traffic → only if better by 0.6 min` split
+is what stops the log and the van from churning. The two rounded stadium nodes on the
+left are the *only* ways a disruption enters the system — a manual map click or a
+scripted auto-demo event — and both funnel into the same ahead-of-van check.
+
+### 26.3 Diagram conventions used here
+
+* Everything in the two diagrams is taken from the code, not from intent: the
+  endpoint list is the actual `@app` decorator set in `app.py`; the routing steps are
+  the actual step order in `routing.solve_route`; the re-route branch is the actual
+  `if d["kind"] == "traffic"` structure in `engine._maybe_reroute`.
+* Numeric constants shown (`0.6 min`, `450 ms`, `k ≤ 12`, `3 − priority`) are the real
+  values in the source (§19.8 and §20.3 discuss the ones that are hard-coded rather
+  than configurable).
